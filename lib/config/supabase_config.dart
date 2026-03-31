@@ -5,8 +5,8 @@ class SupabaseConfig {
 
   // ── Projet Supabase ──
   // Dashboard → Settings → API
-  static const String url = 'https://VOTRE_PROJECT_ID.supabase.co';
-  static const String anonKey = 'VOTRE_ANON_KEY';
+  static const String url = 'https://wamkyxnwtzlghewgnsxf.supabase.co';
+  static const String anonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndhbWt5eG53dHpsZ2hld2duc3hmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ5NjYzMjQsImV4cCI6MjA5MDU0MjMyNH0.XFqPMPgxi4R35YDDcPNwuMdRnUfQBX4JM9NTRWuTdpA';
 
   // ── Buckets Storage ──
   static const String bucketPhotos = 'photos-colis';
