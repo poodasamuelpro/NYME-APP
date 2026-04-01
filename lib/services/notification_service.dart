@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 import '../config/supabase_config.dart';
 
@@ -18,6 +20,9 @@ class NotificationService {
   static bool _firebaseDisponible = false;
   static bool _initialise = false;
 
+  // URL de ton backend Vercel
+  static const String _vercelUrl = 'https://fcn-backend-zva5gaxix-poodasamuelpros-projects.vercel.app/api/send';
+
   // Canal Android
   static const AndroidNotificationChannel _canal = AndroidNotificationChannel(
     'nyme_canal',
@@ -33,7 +38,6 @@ class NotificationService {
 
     // Essayer Firebase sans bloquer si absent
     try {
-      // Import dynamique pour éviter le crash si non configuré
       await _initialiserFirebase();
       _firebaseDisponible = true;
       debugPrint('[Notifications] Firebase OK ✅');
@@ -59,7 +63,6 @@ class NotificationService {
       onDidReceiveNotificationResponse: _onNotificationTap,
     );
 
-    // Créer le canal Android
     await _local
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
@@ -68,20 +71,12 @@ class NotificationService {
 
   // ── Initialisation Firebase (peut échouer silencieusement) ──
   static Future<void> _initialiserFirebase() async {
-    // On utilise une import conditionnelle
-    // Si firebase_core et firebase_messaging sont dans pubspec.yaml
-    // et que google-services.json est présent, ça marche
-    // Sinon ça lève une exception qu'on attrape dans initializeAvecFirebase
-
-    // ignore: avoid_dynamic_calls
     final firebase = await _chargerFirebase();
     if (firebase == null) throw Exception('Firebase non configuré');
   }
 
   static Future<dynamic> _chargerFirebase() async {
     try {
-      // Tentative de chargement Firebase
-      // ignore: deprecated_member_use
       final core = await compute(_initFirebaseIsolate, null);
       return core;
     } catch (_) {
@@ -131,16 +126,15 @@ class NotificationService {
   }
 
   // ── Sauvegarder token FCM dans Supabase ──
-  static Future<void> sauvegarderToken(String userId) async {
-    if (!_firebaseDisponible) return;
-
+  static Future<void> sauvegarderToken(String userId, String token) async {
     try {
-      // Si Firebase est dispo, récupérer le token
-      // final token = await FirebaseMessaging.instance.getToken();
-      // Pour l'instant on log juste
-      debugPrint('[Notifications] Token FCM à sauvegarder pour $userId');
+      await Supabase.instance.client
+          .from(SupabaseConfig.tableUtilisateurs)
+          .update({'fcm_token': token})
+          .eq('id', userId);
+      debugPrint('[Notifications] Token FCM sauvegardé pour $userId');
     } catch (e) {
-      debugPrint('[Notifications] Erreur token FCM: $e');
+      debugPrint('[Notifications] Erreur sauvegarde token: $e');
     }
   }
 
@@ -165,14 +159,13 @@ class NotificationService {
         'created_at': DateTime.now().toIso8601String(),
       });
 
-      // Aussi afficher localement
       await afficher(titre: titre, corps: message, payload: type);
     } catch (e) {
       debugPrint('[Notifications] Erreur enregistrement: $e');
     }
   }
 
-  // ── Envoyer via Edge Function Supabase (push réel) ──
+  // ── Envoyer via backend Vercel (push réel) ──
   static Future<void> envoyerPush({
     required String destinataireId,
     required String titre,
@@ -180,17 +173,38 @@ class NotificationService {
     Map<String, dynamic>? data,
   }) async {
     try {
-      await Supabase.instance.client.functions.invoke(
-        'envoyer-notification',
-        body: {
-          'destinataire_id': destinataireId,
+      // 1. Récupérer le token FCM de l'utilisateur
+      final userResponse = await Supabase.instance.client
+          .from(SupabaseConfig.tableUtilisateurs)
+          .select('fcm_token')
+          .eq('id', destinataireId)
+          .single();
+
+      final token = userResponse['fcm_token'];
+      if (token == null || token == '') {
+        debugPrint('[Notifications] Pas de FCM token pour $destinataireId');
+        return;
+      }
+
+      // 2. Appeler le backend Vercel
+      final response = await http.post(
+        Uri.parse(_vercelUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'token': token,
           'titre': titre,
           'corps': corps,
           'data': data ?? {},
-        },
+        }),
       );
+
+      if (response.statusCode == 200) {
+        debugPrint('[Notifications] Push envoyé avec succès');
+      } else {
+        debugPrint('[Notifications] Erreur Vercel: ${response.body}');
+      }
     } catch (e) {
-      debugPrint('[Notifications] Push non envoyé (Edge Function absente): $e');
+      debugPrint('[Notifications] Erreur envoi push: $e');
     }
   }
 
@@ -213,7 +227,6 @@ class NotificationService {
           callback: (payload) {
             final data = payload.newRecord;
             onNouvelle(data);
-            // Afficher localement aussi
             afficher(
               titre: data['titre'] ?? 'NYME',
               corps: data['message'] ?? '',
@@ -260,4 +273,3 @@ class NotificationService {
 // Provider
 final notificationServiceProvider =
     Provider<NotificationService>((_) => NotificationService());
-
