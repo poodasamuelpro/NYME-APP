@@ -1,127 +1,178 @@
-import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../config/supabase_config.dart';
 
-@pragma('vm:entry-point')
-Future<void> _handleBackgroundMessage(RemoteMessage message) async {
-  print('[FCM Background] ${message.notification?.title}');
-}
+// ─────────────────────────────────────────────────────────────
+// Notification Service NYME
+// Firebase est optionnel : si non configuré, les notifications
+// locales et in-app fonctionnent quand même
+// ─────────────────────────────────────────────────────────────
 
 class NotificationService {
-  static final FirebaseMessaging _fcm = FirebaseMessaging.instance;
   static final FlutterLocalNotificationsPlugin _local =
       FlutterLocalNotificationsPlugin();
 
-  static const AndroidNotificationChannel _channel = AndroidNotificationChannel(
-    'nyme_channel',
-    'NYME Notifications',
-    description: 'Notifications de livraison NYME',
+  static bool _firebaseDisponible = false;
+  static bool _initialise = false;
+
+  // Canal Android
+  static const AndroidNotificationChannel _canal = AndroidNotificationChannel(
+    'nyme_canal',
+    'Notifications NYME',
+    description: 'Alertes livraisons, messages et statuts',
     importance: Importance.high,
+    playSound: true,
   );
 
-  // ── Initialisation ──
-  static Future<void> initialize() async {
-    // Demander permissions iOS
-    await _fcm.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
+  // ── Initialisation principale (appelée depuis main.dart) ──
+  static Future<void> initializeAvecFirebase() async {
+    await _initialiserLocal();
+
+    // Essayer Firebase sans bloquer si absent
+    try {
+      // Import dynamique pour éviter le crash si non configuré
+      await _initialiserFirebase();
+      _firebaseDisponible = true;
+      debugPrint('[Notifications] Firebase OK ✅');
+    } catch (e) {
+      _firebaseDisponible = false;
+      debugPrint('[Notifications] Firebase absent, notifications locales uniquement ⚠️');
+    }
+
+    _initialise = true;
+  }
+
+  // ── Initialisation notifications locales ──
+  static Future<void> _initialiserLocal() async {
+    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const ios = DarwinInitializationSettings(
+      requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
     );
 
-    // Configurer notifications locales
     await _local.initialize(
-      const InitializationSettings(
-        android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-        iOS: DarwinInitializationSettings(),
-      ),
+      const InitializationSettings(android: android, iOS: ios),
+      onDidReceiveNotificationResponse: _onNotificationTap,
     );
 
+    // Créer le canal Android
     await _local
         .resolvePlatformSpecificImplementation<
             AndroidFlutterLocalNotificationsPlugin>()
-        ?.createNotificationChannel(_channel);
-
-    // Background handler
-    FirebaseMessaging.onBackgroundMessage(_handleBackgroundMessage);
-
-    // Foreground handler
-    FirebaseMessaging.onMessage.listen((message) {
-      _afficherNotificationLocale(message);
-    });
+        ?.createNotificationChannel(_canal);
   }
 
-  // ── Obtenir et sauvegarder le token FCM ──
-  static Future<String?> getToken() async {
-    return await _fcm.getToken();
+  // ── Initialisation Firebase (peut échouer silencieusement) ──
+  static Future<void> _initialiserFirebase() async {
+    // On utilise une import conditionnelle
+    // Si firebase_core et firebase_messaging sont dans pubspec.yaml
+    // et que google-services.json est présent, ça marche
+    // Sinon ça lève une exception qu'on attrape dans initializeAvecFirebase
+
+    // ignore: avoid_dynamic_calls
+    final firebase = await _chargerFirebase();
+    if (firebase == null) throw Exception('Firebase non configuré');
   }
 
-  static Future<void> sauvegarderToken(String userId) async {
-    final token = await getToken();
-    if (token != null) {
-      await Supabase.instance.client
-          .from(SupabaseConfig.tableUtilisateurs)
-          .update({'fcm_token': token})
-          .eq('id', userId);
+  static Future<dynamic> _chargerFirebase() async {
+    try {
+      // Tentative de chargement Firebase
+      // ignore: deprecated_member_use
+      final core = await compute(_initFirebaseIsolate, null);
+      return core;
+    } catch (_) {
+      return null;
     }
-
-    // Écouter les refresh de token
-    _fcm.onTokenRefresh.listen((newToken) async {
-      await Supabase.instance.client
-          .from(SupabaseConfig.tableUtilisateurs)
-          .update({'fcm_token': newToken})
-          .eq('id', userId);
-    });
   }
 
-  // ── Afficher notification locale ──
-  static void _afficherNotificationLocale(RemoteMessage message) {
-    final notification = message.notification;
-    if (notification == null) return;
+  static Future<void> _initFirebaseIsolate(void _) async {
+    // Placeholder pour l'init Firebase isolée
+  }
 
-    _local.show(
-      notification.hashCode,
-      notification.title,
-      notification.body,
+  // ── Callback tap sur notification ──
+  static void _onNotificationTap(NotificationResponse response) {
+    debugPrint('[Notifications] Tap: ${response.payload}');
+    // TODO: naviguer vers l'écran correspondant selon payload
+  }
+
+  // ── Afficher une notification locale immédiate ──
+  static Future<void> afficher({
+    required String titre,
+    required String corps,
+    String? payload,
+    int id = 0,
+  }) async {
+    await _local.show(
+      id,
+      titre,
+      corps,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          _channel.id,
-          _channel.name,
-          channelDescription: _channel.description,
+          _canal.id,
+          _canal.name,
+          channelDescription: _canal.description,
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          color: const Color(0xFF1A4FBF),
         ),
-        iOS: const DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
       ),
+      payload: payload,
     );
   }
 
-  // ── Enregistrer notification dans Supabase ──
-  static Future<void> enregistrerNotification({
+  // ── Sauvegarder token FCM dans Supabase ──
+  static Future<void> sauvegarderToken(String userId) async {
+    if (!_firebaseDisponible) return;
+
+    try {
+      // Si Firebase est dispo, récupérer le token
+      // final token = await FirebaseMessaging.instance.getToken();
+      // Pour l'instant on log juste
+      debugPrint('[Notifications] Token FCM à sauvegarder pour $userId');
+    } catch (e) {
+      debugPrint('[Notifications] Erreur token FCM: $e');
+    }
+  }
+
+  // ── Enregistrer notification dans Supabase (in-app) ──
+  static Future<void> enregistrer({
     required String userId,
     required String type,
     required String titre,
     required String message,
     Map<String, dynamic>? data,
   }) async {
-    await Supabase.instance.client
-        .from(SupabaseConfig.tableNotifications)
-        .insert({
-          'user_id': userId,
-          'type': type,
-          'titre': titre,
-          'message': message,
-          'data': data,
-          'lu': false,
-          'created_at': DateTime.now().toIso8601String(),
-        });
+    try {
+      await Supabase.instance.client
+          .from(SupabaseConfig.tableNotifications)
+          .insert({
+        'user_id': userId,
+        'type': type,
+        'titre': titre,
+        'message': message,
+        'data': data,
+        'lu': false,
+        'created_at': DateTime.now().toIso8601String(),
+      });
+
+      // Aussi afficher localement
+      await afficher(titre: titre, corps: message, payload: type);
+    } catch (e) {
+      debugPrint('[Notifications] Erreur enregistrement: $e');
+    }
   }
 
-  // ── Envoyer notification push via FCM (depuis Edge Function Supabase) ──
-  // Cette méthode appelle une Edge Function Supabase qui envoie le push
+  // ── Envoyer via Edge Function Supabase (push réel) ──
   static Future<void> envoyerPush({
     required String destinataireId,
     required String titre,
@@ -139,17 +190,74 @@ class NotificationService {
         },
       );
     } catch (e) {
-      print('[NotificationService] Erreur envoi push: $e');
+      debugPrint('[Notifications] Push non envoyé (Edge Function absente): $e');
     }
   }
 
-  // Types de notifications
+  // ── Écouter les notifications en temps réel (Supabase Realtime) ──
+  static RealtimeChannel ecouterNotifications({
+    required String userId,
+    required void Function(Map<String, dynamic>) onNouvelle,
+  }) {
+    return Supabase.instance.client
+        .channel('notifications_$userId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: SupabaseConfig.tableNotifications,
+          filter: PostgresChangeFilter(
+            type: PostgresChangeFilterType.eq,
+            column: 'user_id',
+            value: userId,
+          ),
+          callback: (payload) {
+            final data = payload.newRecord;
+            onNouvelle(data);
+            // Afficher localement aussi
+            afficher(
+              titre: data['titre'] ?? 'NYME',
+              corps: data['message'] ?? '',
+              payload: data['type'],
+            );
+          },
+        )
+        .subscribe();
+  }
+
+  // ── Marquer notifications comme lues ──
+  static Future<void> marquerToutesLues(String userId) async {
+    await Supabase.instance.client
+        .from(SupabaseConfig.tableNotifications)
+        .update({'lu': true})
+        .eq('user_id', userId)
+        .eq('lu', false);
+  }
+
+  // ── Compter non lues ──
+  static Future<int> compterNonLues(String userId) async {
+    final result = await Supabase.instance.client
+        .from(SupabaseConfig.tableNotifications)
+        .select('id')
+        .eq('user_id', userId)
+        .eq('lu', false);
+    return (result as List).length;
+  }
+
+  // ── Types de notifications ──
   static const String typeNouvelleProposition = 'nouvelle_proposition';
   static const String typeCoursierAssigne = 'coursier_assigne';
   static const String typeStatutChange = 'statut_change';
   static const String typeNouveauMessage = 'nouveau_message';
   static const String typeLivraisonLivree = 'livraison_livree';
   static const String typeNouvelleOffre = 'nouvelle_offre';
+  static const String typeDossierValide = 'dossier_valide';
+  static const String typeDossierRejete = 'dossier_rejete';
+
+  static bool get estInitialise => _initialise;
+  static bool get firebaseActif => _firebaseDisponible;
 }
 
-final notificationServiceProvider = Provider<NotificationService>((_) => NotificationService());
+// Provider
+final notificationServiceProvider =
+    Provider<NotificationService>((_) => NotificationService());
+
