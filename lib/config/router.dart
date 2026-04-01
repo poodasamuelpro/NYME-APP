@@ -3,102 +3,140 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+// Auth
 import '../presentation/screens/auth/splash_screen.dart';
 import '../presentation/screens/auth/connexion_screen.dart';
 import '../presentation/screens/auth/inscription_screen.dart';
 import '../presentation/screens/auth/verification_otp_screen.dart';
 import '../presentation/screens/auth/verification_coursier_screen.dart';
+
+// Client
 import '../presentation/screens/client/client_shell.dart';
 import '../presentation/screens/client/accueil_client_screen.dart';
-import '../presentation/screens/client/nouvelle_livraison_screen.dart';
-import '../presentation/screens/client/suivi_livraison_screen.dart';
-import '../presentation/screens/client/detail_livraison_screen.dart';
+import '../presentation/screens/client/tableau_bord_client_screen.dart';
 import '../presentation/screens/client/historique_client_screen.dart';
 import '../presentation/screens/client/profil_client_screen.dart';
+import '../presentation/screens/client/nouvelle_livraison_screen.dart';
+import '../presentation/screens/client/propositions_prix_screen.dart';
+import '../presentation/screens/client/suivi_livraison_screen.dart';
+import '../presentation/screens/client/detail_livraison_screen.dart';
 import '../presentation/screens/client/adresses_favorites_screen.dart';
 import '../presentation/screens/client/contacts_favoris_screen.dart';
-import '../presentation/screens/client/tableau_bord_client_screen.dart';
-import '../presentation/screens/client/propositions_prix_screen.dart';
+
+// Coursier
 import '../presentation/screens/coursier/coursier_shell.dart';
 import '../presentation/screens/coursier/accueil_coursier_screen.dart';
 import '../presentation/screens/coursier/carte_coursier_screen.dart';
 import '../presentation/screens/coursier/tableau_bord_coursier_screen.dart';
 import '../presentation/screens/coursier/gains_screen.dart';
 import '../presentation/screens/coursier/profil_coursier_screen.dart';
-import '../presentation/screens/chat/chat_screen.dart';
+
+// Chat
 import '../presentation/screens/chat/liste_conversations_screen.dart';
+import '../presentation/screens/chat/chat_screen.dart';
+
+// Admin
 import '../presentation/screens/admin/admin_shell.dart';
 import '../presentation/screens/admin/tableau_bord_admin_screen.dart';
 import '../presentation/screens/admin/verifications_screen.dart';
 import '../presentation/screens/admin/utilisateurs_screen.dart';
 import '../presentation/screens/admin/litiges_screen.dart';
+
+// Partagé
 import '../presentation/screens/shared/notifications_screen.dart';
 import '../presentation/screens/shared/parametres_screen.dart';
+import '../presentation/screens/shared/reclamation_screen.dart';
 
-// Routes nommées
+// ─────────────────────────────────────────────────────────────
+// Routes NYME — toutes les routes de l'application
+// Fichier : lib/config/router.dart
+// ─────────────────────────────────────────────────────────────
+
 class AppRoutes {
+  // ── Auth ──
   static const splash = '/';
   static const connexion = '/connexion';
   static const inscription = '/inscription';
   static const verificationOtp = '/verification-otp';
   static const verificationCoursier = '/verification-coursier';
 
-  // Client
+  // ── Client ──
   static const clientHome = '/client';
+  static const tableauBordClient = '/client/tableau-bord';
+  static const historiqueClient = '/client/historique';
+  static const profilClient = '/client/profil';
   static const nouvelleLivraison = '/client/nouvelle-livraison';
   static const propositionsPrix = '/client/propositions-prix/:livraisonId';
   static const suiviLivraison = '/client/suivi/:livraisonId';
   static const detailLivraison = '/client/detail/:livraisonId';
-  static const historiqueClient = '/client/historique';
-  static const tableauBordClient = '/client/tableau-bord';
   static const adressesFavorites = '/client/adresses';
   static const contactsFavoris = '/client/contacts';
-  static const profilClient = '/client/profil';
 
-  // Coursier
+  // ── Coursier ──
   static const coursierHome = '/coursier';
-  static const carteCoursier = '/coursier/carte/:livraisonId';
   static const tableauBordCoursier = '/coursier/tableau-bord';
   static const gainsCoursier = '/coursier/gains';
   static const profilCoursier = '/coursier/profil';
+  static const carteCoursier = '/coursier/carte/:livraisonId';
 
-  // Chat
+  // ── Chat ──
   static const listeConversations = '/chat';
   static const chat = '/chat/:livraisonId/:interlocuteurId';
 
-  // Admin
+  // ── Admin ──
   static const adminHome = '/admin';
   static const verifications = '/admin/verifications';
   static const utilisateurs = '/admin/utilisateurs';
   static const litiges = '/admin/litiges';
 
-  // Partagé
+  // ── Partagé ──
   static const notifications = '/notifications';
   static const parametres = '/parametres';
+  static const reclamation = '/reclamation';
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: AppRoutes.splash,
+    debugLogDiagnostics: false,
+
+    // Redirection selon l'état d'authentification
     redirect: (context, state) {
       final session = Supabase.instance.client.auth.currentSession;
       final isAuth = session != null;
-      final isOnAuth = state.matchedLocation == AppRoutes.connexion ||
-          state.matchedLocation == AppRoutes.inscription ||
-          state.matchedLocation == AppRoutes.splash;
 
-      if (!isAuth && !isOnAuth) return AppRoutes.connexion;
+      final routesPubliques = [
+        AppRoutes.connexion,
+        AppRoutes.inscription,
+        AppRoutes.splash,
+        AppRoutes.verificationOtp,
+      ];
+
+      final isPublique = routesPubliques.any((r) => state.matchedLocation.startsWith(r));
+
+      if (!isAuth && !isPublique) return AppRoutes.connexion;
       return null;
     },
+
     routes: [
+      // ── Auth ──
       GoRoute(path: AppRoutes.splash, builder: (_, __) => const SplashScreen()),
       GoRoute(path: AppRoutes.connexion, builder: (_, __) => const ConnexionScreen()),
       GoRoute(path: AppRoutes.inscription, builder: (_, __) => const InscriptionScreen()),
-      GoRoute(path: AppRoutes.verificationOtp, builder: (_, state) =>
-          VerificationOtpScreen(telephone: state.uri.queryParameters['telephone'] ?? '')),
+      GoRoute(
+        path: AppRoutes.verificationOtp,
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return VerificationOtpScreen(
+            telephone: extra?['telephone'] ?? '',
+            email: extra?['email'],
+            type: extra?['type'] ?? 'email',
+          );
+        },
+      ),
       GoRoute(path: AppRoutes.verificationCoursier, builder: (_, __) => const VerificationCoursierScreen()),
 
-      // Shell client (bottom navigation)
+      // ── Shell Client ──
       ShellRoute(
         builder: (_, __, child) => ClientShell(child: child),
         routes: [
@@ -108,17 +146,34 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: AppRoutes.profilClient, builder: (_, __) => const ProfilClientScreen()),
         ],
       ),
-      GoRoute(path: AppRoutes.nouvelleLivraison, builder: (_, __) => const NouvelleLivraisonScreen()),
-      GoRoute(path: AppRoutes.propositionsPrix, builder: (_, state) =>
-          PropositionsPrixScreen(livraisonId: state.pathParameters['livraisonId']!)),
-      GoRoute(path: AppRoutes.suiviLivraison, builder: (_, state) =>
-          SuiviLivraisonScreen(livraisonId: state.pathParameters['livraisonId']!)),
-      GoRoute(path: AppRoutes.detailLivraison, builder: (_, state) =>
-          DetailLivraisonScreen(livraisonId: state.pathParameters['livraisonId']!)),
+
+      // Routes client sans shell
+      GoRoute(
+        path: AppRoutes.nouvelleLivraison,
+        builder: (_, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return NouvelleLivraisonScreen(
+            typeInitial: extra?['type'],
+            pourTiersInitial: extra?['pourTiers'],
+          );
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.propositionsPrix,
+        builder: (_, state) => PropositionsPrixScreen(livraisonId: state.pathParameters['livraisonId']!),
+      ),
+      GoRoute(
+        path: AppRoutes.suiviLivraison,
+        builder: (_, state) => SuiviLivraisonScreen(livraisonId: state.pathParameters['livraisonId']!),
+      ),
+      GoRoute(
+        path: AppRoutes.detailLivraison,
+        builder: (_, state) => DetailLivraisonScreen(livraisonId: state.pathParameters['livraisonId']!),
+      ),
       GoRoute(path: AppRoutes.adressesFavorites, builder: (_, __) => const AdressesFavoritesScreen()),
       GoRoute(path: AppRoutes.contactsFavoris, builder: (_, __) => const ContactsFavorisScreen()),
 
-      // Shell coursier
+      // ── Shell Coursier ──
       ShellRoute(
         builder: (_, __, child) => CoursierShell(child: child),
         routes: [
@@ -128,17 +183,22 @@ final routerProvider = Provider<GoRouter>((ref) {
           GoRoute(path: AppRoutes.profilCoursier, builder: (_, __) => const ProfilCoursierScreen()),
         ],
       ),
-      GoRoute(path: AppRoutes.carteCoursier, builder: (_, state) =>
-          CarteCoursierScreen(livraisonId: state.pathParameters['livraisonId']!)),
+      GoRoute(
+        path: AppRoutes.carteCoursier,
+        builder: (_, state) => CarteCoursierScreen(livraisonId: state.pathParameters['livraisonId']!),
+      ),
 
-      // Chat
+      // ── Chat ──
       GoRoute(path: AppRoutes.listeConversations, builder: (_, __) => const ListeConversationsScreen()),
-      GoRoute(path: AppRoutes.chat, builder: (_, state) => ChatScreen(
-        livraisonId: state.pathParameters['livraisonId']!,
-        interlocuteurId: state.pathParameters['interlocuteurId']!,
-      )),
+      GoRoute(
+        path: AppRoutes.chat,
+        builder: (_, state) => ChatScreen(
+          livraisonId: state.pathParameters['livraisonId']!,
+          interlocuteurId: state.pathParameters['interlocuteurId']!,
+        ),
+      ),
 
-      // Admin
+      // ── Shell Admin ──
       ShellRoute(
         builder: (_, __, child) => AdminShell(child: child),
         routes: [
@@ -149,9 +209,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         ],
       ),
 
-      // Partagé
+      // ── Partagé ──
       GoRoute(path: AppRoutes.notifications, builder: (_, __) => const NotificationsScreen()),
       GoRoute(path: AppRoutes.parametres, builder: (_, __) => const ParametresScreen()),
+      GoRoute(
+        path: AppRoutes.reclamation,
+        builder: (_, state) => ReclamationScreen(
+          livraisonId: state.uri.queryParameters['livraison'],
+        ),
+      ),
     ],
   );
 });
+
