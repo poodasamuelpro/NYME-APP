@@ -10,12 +10,8 @@ import '../presentation/screens/auth/inscription_screen.dart';
 import '../presentation/screens/auth/verification_otp_screen.dart';
 import '../presentation/screens/auth/verification_coursier_screen.dart';
 
-// Client
-import '../presentation/screens/client/client_shell.dart';
-import '../presentation/screens/client/accueil_client_screen.dart';
-import '../presentation/screens/client/tableau_bord_client_screen.dart';
-import '../presentation/screens/client/historique_client_screen.dart';
-import '../presentation/screens/client/profil_client_screen.dart';
+// Client (Fichiers consolidés)
+import '../presentation/screens/client/client_screens.dart';
 import '../presentation/screens/client/nouvelle_livraison_screen.dart';
 import '../presentation/screens/client/propositions_prix_screen.dart';
 import '../presentation/screens/client/suivi_livraison_screen.dart';
@@ -23,32 +19,17 @@ import '../presentation/screens/client/detail_livraison_screen.dart';
 import '../presentation/screens/client/adresses_favorites_screen.dart';
 import '../presentation/screens/client/contacts_favoris_screen.dart';
 
-// Coursier
-import '../presentation/screens/coursier/coursier_shell.dart';
-import '../presentation/screens/coursier/accueil_coursier_screen.dart';
-import '../presentation/screens/coursier/carte_coursier_screen.dart';
-import '../presentation/screens/coursier/tableau_bord_coursier_screen.dart';
-import '../presentation/screens/coursier/gains_screen.dart';
-import '../presentation/screens/coursier/profil_coursier_screen.dart';
+// Coursier (Fichiers consolidés)
+import '../presentation/screens/coursier/coursier_screens.dart';
 
-// Chat
-import '../presentation/screens/chat/liste_conversations_screen.dart';
-import '../presentation/screens/chat/chat_screen.dart';
+// Chat (Fichiers consolidés)
+import '../presentation/screens/chat/chat_screens.dart';
 
-// Admin
-import '../presentation/screens/admin/admin_shell.dart';
-import '../presentation/screens/admin/tableau_bord_admin_screen.dart';
-import '../presentation/screens/admin/verifications_screen.dart';
-import '../presentation/screens/admin/utilisateurs_screen.dart';
-import '../presentation/screens/admin/litiges_screen.dart';
-
-// Partagé
-import '../presentation/screens/shared/notifications_screen.dart';
-import '../presentation/screens/shared/parametres_screen.dart';
-import '../presentation/screens/shared/reclamation_screen.dart';
+// Admin & Partagé (Fichiers consolidés dans all_screens.dart)
+import '../presentation/screens/shared/all_screens.dart';
 
 // ─────────────────────────────────────────────────────────────
-// Routes NYME — toutes les routes de l'application
+// Routes NYME — toutes les routes de l'application (CORRIGÉ)
 // Fichier : lib/config/router.dart
 // ─────────────────────────────────────────────────────────────
 
@@ -221,4 +202,3 @@ final routerProvider = Provider<GoRouter>((ref) {
     ],
   );
 });
-
