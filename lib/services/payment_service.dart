@@ -1,202 +1,224 @@
-import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:uuid/uuid.dart';
-
-import '../config/supabase_config.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../core/errors/app_exception.dart';
-import '../data/models/models.dart';
-
-// ─────────────────────────────────────────────────────────────
-// Service Paiement NYME — CinetPay (Mobile Money)
-// Orange Money, Moov Money, Wave, Coris Money
-// ─────────────────────────────────────────────────────────────
 
 class PaymentService {
-  final SupabaseClient _supabase;
-  final _uuid = const Uuid();
+  // Configuration des API de paiement
+  static const String _cinetpayApiUrl = 'https://api.cinetpay.com/v1';
+  static const String _cinetpayApiKey = 'YOUR_CINETPAY_API_KEY';
+  static const String _cinetpaySecretKey = 'YOUR_CINETPAY_SECRET_KEY';
 
-  // Clés CinetPay (à mettre dans supabase_config.dart)
-  static const String _apiKey = 'VOTRE_API_KEY_CINETPAY';
-  static const String _siteId = 'VOTRE_SITE_ID_CINETPAY';
-  static const String _baseUrl = 'https://api-checkout.cinetpay.com/v2/payment';
-
-  PaymentService(this._supabase);
-
-  // ── Initier un paiement Mobile Money ──
-  Future<String> initierPaiement({
-    required String livraisonId,
-    required double montant,
-    required String clientId,
+  // Initier un paiement via CinetPay (Mobile Money)
+  Future<Map<String, dynamic>> initiateMobileMoneyPayment({
+    required String userId,
+    required double amount,
+    required String phoneNumber,
     required String description,
-    ModePaiement mode = ModePaiement.mobileMoney,
   }) async {
-    final transactionId = _uuid.v4().replaceAll('-', '').substring(0, 16);
-
     try {
-      // Enregistrer le paiement en attente dans Supabase
-      await _supabase.from(SupabaseConfig.tablePaiements).insert({
-        'livraison_id': livraisonId,
-        'montant': montant,
-        'mode': mode.name,
-        'reference': transactionId,
-        'statut': 'en_attente',
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      final payload = {
+        'apikey': _cinetpayApiKey,
+        'site_id': 'YOUR_SITE_ID',
+        'amount': amount.toInt(),
+        'currency': 'XOF', // Franc CFA
+        'description': description,
+        'customer_phone_number': phoneNumber,
+        'customer_name': userId,
+        'notify_url': 'https://your-domain.com/webhook/cinetpay',
+        'return_url': 'https://your-domain.com/payment/success',
+      };
 
-      // Appeler l'Edge Function pour créer le lien CinetPay
-      final result = await _supabase.functions.invoke(
-        'initier-paiement',
-        body: {
-          'transaction_id': transactionId,
-          'montant': montant.toInt(),
-          'livraison_id': livraisonId,
-          'client_id': clientId,
-          'description': description,
-          'devise': 'XOF', // FCFA
-        },
+      final response = await http.post(
+        Uri.parse('$_cinetpayApiUrl/payment/create'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
       );
 
-      final data = result.data as Map<String, dynamic>;
-      if (data['code'] != '201') {
-        throw AppException(data['message'] ?? 'Erreur CinetPay');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'success': data['code'] == '00',
+          'transaction_id': data['transaction_id'],
+          'payment_token': data['payment_token'],
+          'redirect_url': data['redirect_url'],
+        };
+      } else {
+        throw AppException('Erreur lors de l\'initiation du paiement: ${response.statusCode}');
       }
-
-      // Retourner l'URL de paiement CinetPay
-      return data['data']['payment_url'];
     } catch (e) {
-      throw AppException('Erreur paiement: $e');
+      throw AppException('Erreur lors du paiement Mobile Money: $e');
     }
   }
 
-  // ── Vérifier le statut d'un paiement ──
-  Future<bool> verifierStatut(String reference) async {
+  // Vérifier le statut d'un paiement CinetPay
+  Future<Map<String, dynamic>> checkPaymentStatus(String transactionId) async {
     try {
-      final result = await _supabase.functions.invoke(
-        'verifier-paiement',
-        body: {'reference': reference},
+      final response = await http.post(
+        Uri.parse('$_cinetpayApiUrl/payment/check'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'apikey': _cinetpayApiKey,
+          'site_id': 'YOUR_SITE_ID',
+          'transaction_id': transactionId,
+        }),
       );
-      final data = result.data as Map<String, dynamic>;
-      return data['statut'] == 'succes';
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'status': data['status'],
+          'amount': data['amount'],
+          'currency': data['currency'],
+          'description': data['description'],
+        };
+      } else {
+        throw AppException('Erreur lors de la vérification du paiement: ${response.statusCode}');
+      }
     } catch (e) {
-      return false;
+      throw AppException('Erreur lors de la vérification du paiement: $e');
     }
   }
 
-  // ── Enregistrer paiement cash (à la livraison) ──
-  Future<void> enregistrerPaiementCash({
-    required String livraisonId,
-    required double montant,
+  // Initier un paiement via Flutterwave (Carte Bancaire)
+  Future<Map<String, dynamic>> initiateCardPayment({
+    required String userId,
+    required double amount,
+    required String email,
+    required String description,
   }) async {
-    await _supabase.from(SupabaseConfig.tablePaiements).insert({
-      'livraison_id': livraisonId,
-      'montant': montant,
-      'mode': 'cash',
-      'statut': 'succes',
-      'paye_le': DateTime.now().toIso8601String(),
-      'created_at': DateTime.now().toIso8601String(),
-    });
-
-    await _supabase
-        .from(SupabaseConfig.tableLivraisons)
-        .update({'statut_paiement': 'paye', 'mode_paiement': 'cash'})
-        .eq('id', livraisonId);
-  }
-
-  // ── Historique des paiements d'un utilisateur ──
-  Future<List<Map<String, dynamic>>> getHistorique(String userId) async {
-    final data = await _supabase
-        .from(SupabaseConfig.tablePaiements)
-        .select('''
-          *,
-          livraison:livraison_id(id, depart_adresse, arrivee_adresse, created_at)
-        ''')
-        .order('created_at', ascending: false)
-        .limit(30);
-    return List<Map<String, dynamic>>.from(data);
-  }
-}
-
-// ── Widget WebView pour le paiement CinetPay ──
-class PaiementWebViewScreen extends StatefulWidget {
-  final String urlPaiement;
-  final String livraisonId;
-  final void Function(bool succes) onResultat;
-
-  const PaiementWebViewScreen({
-    super.key,
-    required this.urlPaiement,
-    required this.livraisonId,
-    required this.onResultat,
-  });
-
-  @override
-  State<PaiementWebViewScreen> createState() => _PaiementWebViewState();
-}
-
-class _PaiementWebViewState extends State<PaiementWebViewScreen> {
-  late final WebViewController _ctrl;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (_) => setState(() => _loading = true),
-        onPageFinished: (url) {
-          setState(() => _loading = false);
-          // Détecter le retour CinetPay
-          if (url.contains('success') || url.contains('return')) {
-            widget.onResultat(true);
-            Navigator.pop(context);
-          } else if (url.contains('cancel') || url.contains('error')) {
-            widget.onResultat(false);
-            Navigator.pop(context);
-          }
+    try {
+      final payload = {
+        'tx_ref': 'CARD_${DateTime.now().millisecondsSinceEpoch}',
+        'amount': amount,
+        'currency': 'XOF',
+        'customer': {
+          'email': email,
+          'name': userId,
         },
-      ))
-      ..loadRequest(Uri.parse(widget.urlPaiement));
+        'customizations': {
+          'title': 'NYME Recharge',
+          'description': description,
+        },
+        'redirect_url': 'https://your-domain.com/payment/success',
+      };
+
+      final response = await http.post(
+        Uri.parse('https://api.flutterwave.com/v3/payments'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer YOUR_FLUTTERWAVE_SECRET_KEY',
+        },
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'success': data['status'] == 'success',
+          'link': data['data']['link'],
+          'reference': data['data']['reference'],
+        };
+      } else {
+        throw AppException('Erreur lors de l\'initiation du paiement: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw AppException('Erreur lors du paiement par carte: $e');
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Paiement sécurisé'),
-        leading: IconButton(
-          icon: const Icon(Icons.close),
-          onPressed: () {
-            widget.onResultat(false);
-            Navigator.pop(context);
-          },
-        ),
-        backgroundColor: const Color(0xFF1A4FBF),
-        foregroundColor: Colors.white,
-      ),
-      body: Stack(
-        children: [
-          WebViewWidget(controller: _ctrl),
-          if (_loading)
-            const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Color(0xFF1A4FBF)),
-                  SizedBox(height: 16),
-                  Text('Chargement du paiement...'),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
+  // Vérifier le statut d'un paiement Flutterwave
+  Future<Map<String, dynamic>> checkFlutterwavePaymentStatus(String reference) async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://api.flutterwave.com/v3/transactions/$reference/verify'),
+        headers: {
+          'Authorization': 'Bearer YOUR_FLUTTERWAVE_SECRET_KEY',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'status': data['data']['status'],
+          'amount': data['data']['amount'],
+          'currency': data['data']['currency'],
+        };
+      } else {
+        throw AppException('Erreur lors de la vérification du paiement: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw AppException('Erreur lors de la vérification du paiement: $e');
+    }
+  }
+
+  // Traiter un retrait bancaire via Flutterwave
+  Future<Map<String, dynamic>> initiateTransfer({
+    required String accountNumber,
+    required String bankCode,
+    required double amount,
+    required String narration,
+  }) async {
+    try {
+      final payload = {
+        'account_number': accountNumber,
+        'amount': amount,
+        'narration': narration,
+        'currency': 'XOF',
+        'bank_code': bankCode,
+        'reference': 'TRANSFER_${DateTime.now().millisecondsSinceEpoch}',
+      };
+
+      final response = await http.post(
+        Uri.parse('https://api.flutterwave.com/v3/transfers'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer YOUR_FLUTTERWAVE_SECRET_KEY',
+        },
+        body: jsonEncode(payload),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'success': data['status'] == 'success',
+          'transfer_id': data['data']['id'],
+          'reference': data['data']['reference'],
+        };
+      } else {
+        throw AppException('Erreur lors du virement: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw AppException('Erreur lors du virement: $e');
+    }
+  }
+
+  // Vérifier le statut d'un virement
+  Future<Map<String, dynamic>> checkTransferStatus(String transferId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('https://api.flutterwave.com/v3/transfers/$transferId'),
+        headers: {
+          'Authorization': 'Bearer YOUR_FLUTTERWAVE_SECRET_KEY',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return {
+          'status': data['data']['status'],
+          'amount': data['data']['amount'],
+          'reference': data['data']['reference'],
+        };
+      } else {
+        throw AppException('Erreur lors de la vérification du virement: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw AppException('Erreur lors de la vérification du virement: $e');
+    }
   }
 }
 
 final paymentServiceProvider = Provider<PaymentService>((ref) {
-  return PaymentService(Supabase.instance.client);
+  return PaymentService();
 });
-
